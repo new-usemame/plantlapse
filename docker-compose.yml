@@ -1,0 +1,28 @@
+# Deployment on the NVR host. Settings come from .env beside this file (never committed):
+#   PLANTLAPSE_STREAM_URL  the camera's RTSP restream
+#   PLANTLAPSE_TOKEN       bearer token the app sends
+#   PLANTLAPSE_FRAMES      host directory for frames (long-term storage)
+#   PLANTLAPSE_STATE       host directory for the SQLite database (local disk, not network storage)
+#   PLANTLAPSE_HF_CACHE    host directory caching model weights
+#   PLANTLAPSE_LATLON      "lat,lon" of the camera; day/night is decided by the sun (optional)
+#   PLANTLAPSE_SNAPSHOT_URL the camera's own JPEG snapshot, tried before the stream (optional)
+services:
+  plantlapse:
+    build: .
+    image: plantlapse:latest
+    container_name: plantlapse
+    restart: unless-stopped
+    ports: ["5056:5056"]
+    cpus: 4
+    mem_limit: 4g
+    environment:
+      PLANTLAPSE_STREAM_URL: ${PLANTLAPSE_STREAM_URL:?}
+      PLANTLAPSE_TOKEN: ${PLANTLAPSE_TOKEN:?}
+      PLANTLAPSE_CAMERA: ${PLANTLAPSE_CAMERA:-cam}
+      PLANTLAPSE_LATLON: ${PLANTLAPSE_LATLON:-}
+      PLANTLAPSE_SNAPSHOT_URL: ${PLANTLAPSE_SNAPSHOT_URL:-}
+      PLANTLAPSE_TORCH_THREADS: "4"
+    volumes:
+      - ${PLANTLAPSE_FRAMES:?}:/data
+      - ${PLANTLAPSE_STATE:?}:/state
+      - ${PLANTLAPSE_HF_CACHE:?}:/hf
