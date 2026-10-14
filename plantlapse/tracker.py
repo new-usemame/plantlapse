@@ -38,10 +38,16 @@ class Params:
     min_side: float = 160.0      # never crop tighter than this many source pixels
     deadband: float = 0.14       # centre may wander this fraction of the crop side before it counts
     move_now: float = 0.45       # a confident sighting this far away (× side) re-anchors at once
-    grow: float = 1.18           # the median desired side must pass side × grow to enlarge the crop,
-    shrink: float = 0.72         # or fall below side × shrink to shrink it
-    size_window: int = 8         # desired sides remembered (2 h at 15 min): a plant does not change size
-                                 # within that, so one or two odd boxes cannot zoom the timelapse
+    size_window: int = 96        # desired sides remembered: two days of daylight at 15 min, so the
+                                 # detector's habits at one time of day (a box on just the pot or the
+                                 # top leaves, every late afternoon) cannot set the plant's size
+    size_pct: float = 75.0       # the plant's size is this percentile of them: a box that clips the
+                                 # plant is likelier than one that overreaches, and a loose crop beats a cut-off plant
+    size_evidence: int = 24      # sightings needed before the size may change (6 daylight hours): a
+                                 # percentile of a handful of boxes is one odd box away from a zoom
+    size_tolerance: float = 0.08 # within this fraction of that size the crop does not change at all
+    zoom_step: float = 0.01      # and outside it the crop eases by at most this fraction per capture, so
+                                 # a plant that grows or is re-measured zooms slowly instead of jumping
     max_protos: int = 48
     proto_novelty: float = 0.92  # only remember a view less similar than this to every stored one
     promote_hits: int = 3        # daylight sightings before a new thing becomes a plant
@@ -247,6 +253,10 @@ def _assign_once(plants, dets, mode, frame_wh, p, all_sims, banned) -> dict[str,
     return out
 
 
+def target_size(sizes: list[float], p: Params) -> float:
+    return float(np.percentile(sizes, p.size_pct))
+
+
 def update_framing(pl: Plant, box: Box, sim: float | None, p: Params) -> None:
     c = center(box)
     desired = max(p.min_side, p.fill * longer_side(box))
@@ -264,12 +274,12 @@ def update_framing(pl: Plant, box: Box, sim: float | None, p: Params) -> None:
         pl.displaced_streak += 1
         if pl.displaced_streak >= 2:
             pl.anchor, pl.displaced_streak = c, 0
-    if not pl.sizes:  # carried over from before sizes were remembered: its size held for an hour
+    if not pl.sizes:  # carried over from before sizes were remembered: its size held for half the window
         pl.sizes = [pl.size] * (p.size_window // 2)
     pl.sizes = (pl.sizes + [desired])[-p.size_window:]
-    typical = float(np.median(pl.sizes))
-    if not pl.size * p.shrink <= typical <= pl.size * p.grow:
-        pl.size = typical
+    gap = math.log(target_size(pl.sizes, p) / pl.size)
+    if len(pl.sizes) >= p.size_evidence and abs(gap) > math.log(1 + p.size_tolerance):
+        pl.size *= math.exp(max(-p.zoom_step, min(p.zoom_step, gap)))
 
 
 def remember(pl: Plant, vec: np.ndarray | None, p: Params) -> None:
@@ -306,7 +316,8 @@ def step(plants: list[Plant], candidates: list[Candidate], dets: list[Det], mode
     for pid, m in matches.items():
         pl = by_id[pid]
         d = dets[m.det]
-        update_framing(pl, d.box, m.sim, p)
+        if mode == "day":  # night boxes are position-only guesses: they hold the plant, never reframe it
+            update_framing(pl, d.box, m.sim, p)
         pl.last_box = d.box
         pl.miss_streak = 0
         if d.kind == "plant":

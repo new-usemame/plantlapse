@@ -23,8 +23,9 @@ each timelapse follows its own plant.
   that never moves). It is tracked but hidden, so it never shows up as a "new plant".
 - **Moves and swaps:** a plant that is still where it was can't be taken by a look-alike elsewhere. Two plants
   never share a box, so a swap resolves to the right plants.
-- **Steady framing:** each plant's crop size follows the median of its last two hours of boxes, so a box that
-  briefly reaches into the hedge can't zoom the timelapse. Moving the plant resets it.
+- **Steady framing:** each plant's crop size follows the upper quartile of its last two days of boxes and eases
+  by at most 1% per capture, so a detector that boxes only the pot every late afternoon, or a box that reaches
+  into the hedge, can't zoom the timelapse. Moving the plant resets it.
 - **Night:** day and night come from the sun's elevation at your location, not the picture. A camera under a
   porch light shoots in colour all night, and lamplight changes how plants look. At night, frames are saved at
   each plant's last daylight framing and identities never change.

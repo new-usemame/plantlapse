@@ -3,6 +3,9 @@
 Each plant gets a random unit vector; a sighting is that vector plus noise, so "looks like"
 is controlled exactly and the tests exercise the tracker's decisions, not a model's.
 """
+import json
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -150,16 +153,62 @@ def test_crop_stays_inside_the_frame_at_the_edge():
     assert x0 == 0 and y1 == WH[1] and x1 - x0 == y1 - y0
 
 
-def test_growth_enlarges_the_crop_only_when_sustained():
+def test_growth_enlarges_the_crop_slowly_and_only_when_sustained():
     a = plant("a", A_LOOK, 1000, 600)
-    for _ in range(7):
+    for _ in range(10):
         step([a], [], [Det(box_at(1000, 600), 0.4, look(A_LOOK))], "day", WH, "t0")
     s0 = a.size
     for _ in range(3):
         step([a], [], [Det(box_at(1000, 600, 200, 260), 0.4, look(A_LOOK))], "day", WH, "t1")
     assert a.size == s0
-    step([a], [], [Det(box_at(1000, 600, 200, 260), 0.4, look(A_LOOK))], "day", WH, "t2")
-    assert a.size > s0
+    sides = [crop_window(a, WH)[2] - crop_window(a, WH)[0]]
+    for _ in range(100):
+        step([a], [], [Det(box_at(1000, 600, 200, 260), 0.4, look(A_LOOK))], "day", WH, "t2")
+        sides.append(crop_window(a, WH)[2] - crop_window(a, WH)[0])
+    assert a.size > 1.3 * s0
+    assert all(abs(y - x) <= 0.01 * x + 1 for x, y in zip(sides, sides[1:])), "the crop jumped instead of easing"
+
+
+REAL = json.loads((Path(__file__).parent / "data" / "real_boxes_2026_10_13.json").read_text())
+
+
+def replay_real(rows):
+    """Found a plant on the first three real boxes, then feed it the rest; returns (ts, window) per capture."""
+    boxes = [tuple(r[1:]) for r in rows]
+    a = plant_from_candidate("a", Candidate(None, boxes[2], look(A_LOOK), 3, "t", "t", 0, boxes[:3]))
+    a.protos += [look(A_LOOK) for _ in range(6)]
+    out = []
+    for r, b in zip(rows[3:], boxes[3:]):
+        step([a], [], [Det(b, 0.4, look(A_LOOK))], "day", WH, r[0])
+        out.append((r[0], crop_window(a, WH)))
+    return out
+
+
+def contains(win, box):
+    return win[0] <= box[0] and win[1] <= box[1] and win[2] >= box[2] and win[3] >= box[3]
+
+
+@pytest.mark.parametrize("name, whole_ts", [("carnivorous", "20261013T180000Z"), ("basil", "20261013T130000Z")])
+def test_partial_boxes_never_zoom_the_real_plants(name, whole_ts):
+    # 2026-10-13: late in the day the detector boxed only the carnivorous plant's pitcher tops (20:15,
+    # 21:15) or only its pot (22:30), and the basil's box came and went with the railing post beside it.
+    # The live crop shrank from 248 to 172 (and the basil's from 229 to 164 and back to 213), cutting
+    # the plants off. The crop must ease, never jump, and keep the whole plant in it.
+    rows = REAL[name]
+    whole = tuple(next(r for r in rows if r[0] == whole_ts)[1:])
+    wins = replay_real(rows)
+    sides = [w[2] - w[0] for _, w in wins]
+    assert all(abs(y - x) <= 0.01 * x + 1 for x, y in zip(sides, sides[1:])), "the crop jumped"
+    clipped = [ts for ts, w in wins if ts >= "20261013" and not contains(w, whole)]
+    assert not clipped, f"the whole plant fell outside the crop at {clipped}"
+
+
+def test_night_boxes_never_reframe():
+    a = plant("a", A_LOOK, 1290, 670)
+    win0, sizes0 = crop_window(a, WH), list(a.sizes)
+    for _ in range(20):
+        step([a], [], [Det(box_at(1300, 680, 260, 320), 0.4, None)], "night", WH, "t")
+    assert crop_window(a, WH) == win0 and a.sizes == sizes0
 
 
 def test_two_oversized_boxes_in_a_row_do_not_zoom_the_timelapse():

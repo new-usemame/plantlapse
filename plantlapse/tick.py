@@ -25,7 +25,7 @@ from PIL import Image
 from . import config as config_mod
 from . import db as dbm
 from .storage import crop_path, parse_stamp, raw_path, stamp
-from .tracker import Candidate, Det, Params, Plant, crop_window, plant_from_candidate, step, update_framing
+from .tracker import Candidate, Det, Params, Plant, crop_window, plant_from_candidate, step, target_size, update_framing
 
 
 def log(msg: str) -> None:
@@ -303,7 +303,8 @@ def cmd_reframe(cfg: config_mod.Config) -> int:
         fresh = Plant(id=pl.id)
         rows = c.execute("SELECT ts, located, mode, box, crop, sim FROM frames WHERE plant_id=? ORDER BY ts",
                          (pl.id,)).fetchall()
-        states: list[tuple[int, tuple[float, float], float] | None] = []  # (stretch, anchor, size) per row
+        states: list[tuple[int, tuple[float, float]] | None] = []  # (stretch, anchor) per row
+        settled: dict[int, float] = {}  # the size each stretch settled on: the target its sightings set
         stretch = 0
         for r in rows:
             if r["located"] and r["mode"] == "day" and r["box"]:
@@ -311,8 +312,8 @@ def cmd_reframe(cfg: config_mod.Config) -> int:
                 update_framing(fresh, tuple(json.loads(r["box"])), r["sim"], p)
                 if had and fresh.sizes == [fresh.size]:  # the plant moved: a new stretch begins
                     stretch += 1
-            states.append((stretch, fresh.anchor, fresh.size) if fresh.anchor is not None else None)
-        settled = {st[0]: st[2] for st in states if st}  # the last size of each stretch
+                settled[stretch] = target_size(fresh.sizes, p)
+            states.append((stretch, fresh.anchor) if fresh.anchor is not None else None)
         changed = missing = 0
         for r, st in zip(rows, states):
             if st is None:
@@ -335,6 +336,7 @@ def cmd_reframe(cfg: config_mod.Config) -> int:
             c.execute("UPDATE frames SET crop=? WHERE plant_id=? AND ts=?", (dbm.j(list(win)), pl.id, r["ts"]))
             changed += 1
         if fresh.anchor is not None:
+            fresh.size = settled[stretch]  # live capture carries on at the size the history was cut at
             c.execute("UPDATE plants SET anchor_x=?, anchor_y=?, size=?, sizes=? WHERE id=?",
                       (fresh.anchor[0], fresh.anchor[1], fresh.size, dbm.j(fresh.sizes), pl.id))
         log(f"reframe {pl.id}: {changed} of {len(rows)} crops re-cut, {missing} without a raw frame")
