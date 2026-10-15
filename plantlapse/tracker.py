@@ -51,6 +51,8 @@ class Params:
     size_tolerance: float = 0.08 # within this fraction of that size the crop does not change at all
     zoom_step: float = 0.01      # and outside it the crop eases by at most this fraction per capture, so
                                  # a plant that grows or is re-measured zooms slowly instead of jumping
+    crop_margin: float = 1.5     # the saved crop is this much larger than the framing size: room to re-crop
+                                 # or align later (operator, 2026-10-15). Crop only; tracking uses the size
     max_protos: int = 48
     proto_novelty: float = 0.92  # only remember a view less similar than this to every stored one
     promote_hits: int = 3        # daylight sightings before a new thing becomes a plant
@@ -300,11 +302,12 @@ def remember(pl: Plant, vec: np.ndarray | None, p: Params) -> None:
         pl.protos = pl.protos[:keep] + pl.protos[-(p.max_protos - keep):]
 
 
-def crop_window(pl: Plant, frame_wh: tuple[int, int]) -> tuple[int, int, int, int]:
-    """Square crop of the plant's fixed side at its anchor, shifted (never shrunk) to stay in frame."""
+def crop_window(pl: Plant, frame_wh: tuple[int, int], p: Params | None = None) -> tuple[int, int, int, int]:
+    """Square crop of the plant's fixed side plus margin at its anchor, shifted (never shrunk) to stay in frame."""
+    p = p or Params()
     W, H = frame_wh
     assert pl.anchor is not None and pl.size is not None
-    s = int(round(min(pl.size, W, H)))
+    s = int(round(min(p.crop_margin * pl.size, W, H)))
     x0 = int(round(pl.anchor[0] - s / 2))
     y0 = int(round(pl.anchor[1] - s / 2))
     x0 = min(max(0, x0), W - s)

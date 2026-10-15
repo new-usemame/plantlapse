@@ -392,3 +392,13 @@ def test_a_plant_that_really_got_smaller_is_reframed_within_a_week():
     for _ in range(7 * 48):
         step([a], [], [Det(box_at(1290, 670, 100, 120), 0.4, look(A_LOOK))], "day", WH, "t1")
     assert a.size <= 1.08 * 1.55 * 120 < 0.7 * big
+
+
+def test_the_crop_keeps_half_again_the_framing_size_as_margin_and_tracking_ignores_it():
+    # Operator, 2026-10-15: "have the plants in a larger crop than we need because we can always crop it
+    # down later and that way we can align it ... maybe fifty percent larger". The margin is in the crop
+    # only: the framing size still sets how far a plant must move to count as moved.
+    a = plant("a", A_LOOK, 1000, 600)
+    x0, y0, x1, y1 = crop_window(a, WH)
+    assert x1 - x0 == round(1.5 * a.size) and (x0 + x1) / 2 == pytest.approx(1000, abs=1)
+    assert a.size == pytest.approx(1.55 * 170), "the margin leaked into the framing size the tracker uses"
