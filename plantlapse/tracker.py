@@ -38,11 +38,14 @@ class Params:
     min_side: float = 160.0      # never crop tighter than this many source pixels
     deadband: float = 0.14       # centre may wander this fraction of the crop side before it counts
     move_now: float = 0.45       # a confident sighting this far away (× side) re-anchors at once
-    size_window: int = 96        # desired sides remembered: two days of daylight at 15 min, so the
+    size_window: int = 96        # sides a plant may grow on: two days of daylight at 15 min, so the
                                  # detector's habits at one time of day (a box on just the pot or the
                                  # top leaves, every late afternoon) cannot set the plant's size
     size_pct: float = 75.0       # the plant's size is this percentile of them: a box that clips the
                                  # plant is likelier than one that overreaches, and a loose crop beats a cut-off plant
+    size_memory: int = 336       # and never less than that percentile of a week of daylight: a plant does
+                                 # not shrink in two days, but the detector can box only its top for two
+                                 # days running (2026-10-14/15), so growing takes two days and shrinking a week
     size_evidence: int = 24      # sightings needed before the size may change (6 daylight hours): a
                                  # percentile of a handful of boxes is one odd box away from a zoom
     size_tolerance: float = 0.08 # within this fraction of that size the crop does not change at all
@@ -254,7 +257,8 @@ def _assign_once(plants, dets, mode, frame_wh, p, all_sims, banned) -> dict[str,
 
 
 def target_size(sizes: list[float], p: Params) -> float:
-    return float(np.percentile(sizes, p.size_pct))
+    return max(float(np.percentile(sizes[-p.size_window:], p.size_pct)),
+               float(np.percentile(sizes[-p.size_memory:], p.size_pct)))
 
 
 def update_framing(pl: Plant, box: Box, sim: float | None, p: Params) -> None:
@@ -276,7 +280,7 @@ def update_framing(pl: Plant, box: Box, sim: float | None, p: Params) -> None:
             pl.anchor, pl.displaced_streak = c, 0
     if not pl.sizes:  # carried over from before sizes were remembered: its size held for half the window
         pl.sizes = [pl.size] * (p.size_window // 2)
-    pl.sizes = (pl.sizes + [desired])[-p.size_window:]
+    pl.sizes = (pl.sizes + [desired])[-p.size_memory:]
     gap = math.log(target_size(pl.sizes, p) / pl.size)
     if len(pl.sizes) >= p.size_evidence and abs(gap) > math.log(1 + p.size_tolerance):
         pl.size *= math.exp(max(-p.zoom_step, min(p.zoom_step, gap)))
@@ -400,7 +404,7 @@ def plant_from_candidate(pid: str, cand: Candidate, p: Params | None = None) -> 
     boxes = cand.boxes or [cand.box]
     med = tuple(float(np.median([b[i] for b in boxes])) for i in range(4))
     update_framing(pl, med, None, p)  # type: ignore[arg-type]
-    pl.sizes = [max(p.min_side, p.fill * longer_side(b)) for b in boxes][-p.size_window:]
+    pl.sizes = [max(p.min_side, p.fill * longer_side(b)) for b in boxes][-p.size_memory:]
     pl.last_box = cand.box
     pl.protos = [cand.vec]
     pl.new_protos = [cand.vec]

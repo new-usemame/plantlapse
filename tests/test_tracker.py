@@ -363,3 +363,32 @@ def test_swap_where_the_old_spot_holds_a_nested_box_of_the_other_plant():
             Det((1246, 637, 1345, 757), 0.22, with_sims([a_base, c_base], [0.56, 0.79]), "proposal")]
     r = step([a, c], [], dets, "day", WH, "t")
     assert r.matches["a"].det == 0 and r.matches["c"].det == 2
+
+
+WEEK = json.loads((Path(__file__).parent / "data" / "real_boxes_2026_10_12_to_15.json").read_text())
+
+
+def test_two_days_of_partial_boxes_do_not_shrink_a_plant_that_has_not_changed():
+    # 2026-10-14 to 10-15: the detector boxed only the carnivorous plant's pitcher tops, never the pot,
+    # for two straight days. Every recent box asked for the 160 px floor, the 2-day percentile followed
+    # them, and the live crop eased from 248 to 193 on its way to cutting the pot off. A plant does not
+    # shrink in two days: the crop holds until most of a week says it is smaller.
+    rows = WEEK["carnivorous"]
+    whole = tuple(next(r for r in rows if r[0] == "20261013T160000Z")[1:])
+    wins = replay_real(rows)
+    settled = next(w for ts, w in wins if ts >= "20261014T120000Z")
+    side = lambda w: w[2] - w[0]
+    assert side(wins[-1][1]) >= 0.92 * side(settled), "two days of partial boxes shrank the crop"
+    clipped = [ts for ts, w in wins if ts >= "20261013" and not contains(w, whole)]
+    assert not clipped, f"the whole plant fell outside the crop at {clipped}"
+
+
+def test_a_plant_that_really_got_smaller_is_reframed_within_a_week():
+    # The other side of the rule above: a pruned plant must not stay loosely framed forever.
+    a = plant("a", A_LOOK, 1290, 670)
+    for _ in range(100):
+        step([a], [], [Det(box_at(1290, 670, 160, 200), 0.4, look(A_LOOK))], "day", WH, "t0")
+    big = a.size
+    for _ in range(7 * 48):
+        step([a], [], [Det(box_at(1290, 670, 100, 120), 0.4, look(A_LOOK))], "day", WH, "t1")
+    assert a.size <= 1.08 * 1.55 * 120 < 0.7 * big
